@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+config/*.toml
+!config/example.toml
+data/
+/tessa
+/tessa-*
+.gocache/
+*.test
+*.out
+coverage.out
+tessa-*.trace
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,71 @@
+# Name used when Tessa identifies its own replies in conversation context.
+name = "Marta"
+
+# Language for user-visible fallback and rate-limit messages: "en" or "pt-PT".
+locale = "en"
+
+[ptchan]
+# Public ptchan origin used when recognizing thread links in Telegram messages.
+base_url = "https://ptchan.org"
+# Tessa's signed boundary for sanitized thread reads. Tessa must not fetch
+# ptchan directly.
+gateway_url = "http://ptchan-gateway:8080"
+# Name of the ptchan-gateway reading integration. Its secret is read from
+# PTCHAN_INTEGRATION_<INTEGRATION_NAME>_SECRET; for "tessa", use
+# PTCHAN_INTEGRATION_TESSA_SECRET.
+integration_name = "tessa"
+
+[telegram]
+# The only Telegram chat where Tessa may reply.
+discussion_chat_id = -1001234567890
+# Set true only as an explicit decision to let every human in that chat invoke
+# Tessa. Otherwise allowed_user_ids is required.
+allow_all_users = false
+# Telegram user IDs allowed to invoke Tessa when allow_all_users is false.
+allowed_user_ids = [123456789]
+
+[chat]
+# Maximum Unicode characters accepted in one addressed Telegram request.
+max_input_runes = 4096
+# Personality and response guidance sent to the model. {{name}} is replaced by
+# the top-level name. Telegram and ptchan context rules are added by Tessa.
+system_prompt = "You are {{name}}, a helpful conversational assistant in Telegram."
+
+[chat.rate_limit]
+# Per-user and global request budgets, each measured per hour, plus the maximum
+# immediate burst allowed from the corresponding budget.
+user_per_hour = 25
+user_burst = 6
+global_per_hour = 100
+global_burst = 12
+
+[chat.memory]
+# Conversation history stays only in process memory. Forget exchanges after
+# this duration and retain at most this many user/assistant pairs per topic.
+ttl = "10m"
+history_exchanges = 8
+
+[chat.ptchan_context]
+# Maximum non-OP replies included in request-scoped sanitized thread context.
+# This context is never persisted in Telegram history or SQLite.
+max_replies = 25
+
+[deepseek]
+# Model and maximum generated tokens for each completion request.
+model = "deepseek-v4-flash"
+max_tokens = 500
+
+[runtime]
+# Empty disables the HTTP server. Otherwise this address exposes /healthz,
+# /readyz, and Prometheus /metrics.
+http_addr = ":9090"
+
+[runtime.logging]
+# Minimum JSON log level: debug, info, warn, or error. Logs always go to stdout.
+level = "info"
+
+[storage]
+# SQLite database path. Relative paths are resolved from the process working
+# directory; the Docker image runs from /, so data/tessa.db is /data/tessa.db
+# on its persistent named volume.
+sqlite_path = "data/tessa.db"

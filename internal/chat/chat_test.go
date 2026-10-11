@@ -994,6 +994,8 @@ func newFakeMetrics() *fakeMetrics {
 }
 
 func (*fakeMetrics) ObserveTelegramPoll(time.Duration, error) {}
+func (*fakeMetrics) ObserveTelegramRead(string, string)       {}
+func (*fakeMetrics) SetTelegramReady(bool)                    {}
 
 func (*fakeMetrics) ObserveAdmission(string) {}
 

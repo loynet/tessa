@@ -105,6 +105,8 @@ type Sender interface {
 
 type Metrics interface {
 	ObserveTelegramPoll(duration time.Duration, err error)
+	ObserveTelegramRead(method, result string)
+	SetTelegramReady(ready bool)
 	ObserveAdmission(result string)
 	ObserveReply(result string)
 	ObserveContext(contextType string)
@@ -170,9 +172,19 @@ func New(cfg Config, text localization.Localizer, store Store, client *telegram.
 }
 
 func (c *Assistant) Run(ctx context.Context) error {
-	bot, err := c.client.GetMe(ctx)
+	c.metrics.SetTelegramReady(false)
+	defer c.metrics.SetTelegramReady(false)
+	var bot telegram.User
+	err := c.readTelegram(ctx, "getMe", func() error {
+		var err error
+		bot, err = c.client.GetMe(ctx)
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("load bot identity: %w", err)
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
 	}
 	if bot.Username == "" {
 		return fmt.Errorf("telegram bot username is empty")
@@ -188,16 +200,23 @@ func (c *Assistant) Run(ctx context.Context) error {
 	// Updates stay sequential so a stored cursor always means every preceding
 	// message has finished processing.
 	for {
-		startedAt := time.Now()
-		updates, err := c.client.GetUpdates(ctx, offset)
+		var updates []telegram.Update
+		err := c.readTelegram(ctx, "getUpdates", func() error {
+			startedAt := time.Now()
+			var err error
+			updates, err = c.client.GetUpdates(ctx, offset)
+			if ctx.Err() == nil {
+				c.metrics.ObserveTelegramPoll(time.Since(startedAt), err)
+			}
+			return err
+		})
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			c.metrics.ObserveTelegramPoll(time.Since(startedAt), err)
-			return fmt.Errorf("receive updates: %w", err)
+			return err
 		}
-		c.metrics.ObserveTelegramPoll(time.Since(startedAt), nil)
+		c.metrics.SetTelegramReady(true)
 		c.expireConversations(time.Now())
 
 		for _, update := range updates {

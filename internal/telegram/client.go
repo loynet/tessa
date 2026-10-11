@@ -23,12 +23,16 @@ type Client struct {
 
 type APIError struct {
 	StatusCode  int
+	ErrorCode   int    `json:"error_code"`
 	Description string `json:"description"`
 	RetryAfter  int    `json:"-"`
 	Body        []byte `json:"-"`
 }
 
 func (e *APIError) Error() string {
+	if e.Description == "" {
+		return fmt.Sprintf("telegram api error: HTTP status %d", e.StatusCode)
+	}
 	if e.RetryAfter > 0 {
 		return fmt.Sprintf("telegram api error: %s (retry after %ds)", e.Description, e.RetryAfter)
 	}
@@ -105,7 +109,10 @@ func (c *Client) Send(ctx context.Context, request SendRequest) error {
 func (c *Client) do(ctx context.Context, method string, form url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/"+method, strings.NewReader(form.Encode()))
 	if err != nil {
-		return fmt.Errorf("create telegram request: %w", err)
+		return &TransportError{Err: err}
+	}
+	if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.Hostname() == "" {
+		return &TransportError{Err: errors.New("invalid telegram endpoint")}
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -119,19 +126,26 @@ func (c *Client) do(ctx context.Context, method string, form url.Values, out any
 		if errors.As(err, &requestError) {
 			err = requestError.Err
 		}
-		return fmt.Errorf("send telegram request: %w", err)
+		return &TransportError{Err: err, Retryable: temporaryTransportError(err)}
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("read telegram response: %w", err)
+		if resp.StatusCode != http.StatusOK {
+			return &APIError{StatusCode: resp.StatusCode}
+		}
+		return &TransportError{Err: err, Retryable: temporaryTransportError(err)}
 	}
 	if len(body) > maxResponseBytes {
+		if resp.StatusCode != http.StatusOK {
+			return &APIError{StatusCode: resp.StatusCode}
+		}
 		return fmt.Errorf("telegram api response exceeds %d bytes", maxResponseBytes)
 	}
 
 	var result struct {
+		ErrorCode   int             `json:"error_code"`
 		OK          bool            `json:"ok"`
 		Result      json.RawMessage `json:"result"`
 		Description string          `json:"description"`
@@ -141,7 +155,7 @@ func (c *Client) do(ctx context.Context, method string, form url.Values, out any
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("telegram api unexpected status: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+			return &APIError{StatusCode: resp.StatusCode}
 		}
 		return fmt.Errorf("decode telegram response: %w", err)
 	}
@@ -149,13 +163,14 @@ func (c *Client) do(ctx context.Context, method string, form url.Values, out any
 	if !result.OK {
 		return &APIError{
 			StatusCode:  resp.StatusCode,
+			ErrorCode:   result.ErrorCode,
 			Description: result.Description,
 			RetryAfter:  result.Parameters.RetryAfter,
 			Body:        append([]byte(nil), body...),
 		}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("telegram api unexpected status: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return &APIError{StatusCode: resp.StatusCode}
 	}
 	if out != nil && len(result.Result) > 0 {
 		if err := json.Unmarshal(result.Result, out); err != nil {

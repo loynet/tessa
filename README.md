@@ -82,11 +82,53 @@ name; the Makefile intentionally does not publish host ports.
 When `runtime.http_addr` is set, Tessa serves these endpoints:
 
 - `GET /healthz` — process health.
-- `GET /readyz` — ready after Tessa has finished its startup wiring.
+- `GET /readyz` — ready after the first successful Telegram poll; returns 503
+  during identity startup, read outages/backoff, and worker shutdown.
 - `GET /metrics` — Prometheus metrics.
 
 `tessa check-health` requests `/healthz`; set `HEALTHCHECK_ADDR` when it is not
 available on `127.0.0.1:9090`.
+
+`/healthz` remains a liveness check during a Telegram outage. Use `/readyz` and
+worker metrics to detect upstream failure without restarting a healthy process.
+Readiness changes when a read finishes: an in-flight long poll can take up to the
+40-second HTTP timeout to reveal an outage.
+
+Tessa retries temporary `getMe` and `getUpdates` failures in process. Delays grow
+exponentially from a 0.5–1 second interval to a 15–30 second interval, with jitter,
+and reset after a successful read. Rate limits honor Telegram's
+[`parameters.retry_after`](https://core.telegram.org/bots/api#responseparameters)
+as a minimum delay, even above the 30-second cap. Shutdown cancels both requests
+and waits. Authentication/access rejection, polling conflicts, invalid request
+configuration, and protocol errors fail with a bounded diagnostic. For a polling
+conflict, stop any other instance using the token and disable any webhook before
+restarting.
+
+Temporary polling outages retain the update cursor and process-local conversation
+history (subject to its normal TTL). The cursor still advances only after an
+update finishes processing. No automatic retries were added to `sendMessage`;
+its existing rejected-Markdown fallback remains.
+
+An outage logs its first failure, then at most one summary per minute, and one
+recovery message. Read diagnostics contain only the method, bounded reason,
+retry delay, and outage duration.
+
+Telegram metrics:
+
+- `tessa_telegram_poll_requests_total{result="success|error"}` — polling attempts,
+  including retries; canceled requests are excluded.
+- `tessa_telegram_read_requests_total{method="getMe|getUpdates",result="..."}` —
+  read attempts, including identity startup and retries. Outcomes are `success`,
+  `server`, `transport`, `rate_limited`, `credentials`, `conflict`, `configuration`,
+  `permanent`, or `protocol`; canceled requests are excluded.
+- `tessa_telegram_worker_ready` — 1 after a successful poll, 0 during startup,
+  read outages, and shutdown.
+
+After an approved Samantha application release, the operator should deploy only
+Tessa through the infrastructure Compose assembly, retaining its configuration
+and SQLite volume. Verify the scrape target, readiness and polling recovery, and
+the restart count. A real Telegram reply check requires explicit operator
+approval.
 
 Metrics cover Telegram polling, admission decisions, reply delivery, in-memory
 conversation count, ptchan/history/reply context use, and model completion and

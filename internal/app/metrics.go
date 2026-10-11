@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/loynet/ptchan-ai/deepseek"
@@ -10,19 +11,27 @@ import (
 )
 
 type metrics struct {
-	registry   *prometheus.Registry
-	operation  *prometheus.CounterVec
-	admissions *prometheus.CounterVec
-	replies    *prometheus.CounterVec
-	context    *prometheus.CounterVec
-	model      *prometheus.CounterVec
-	tokens     *prometheus.CounterVec
-	active     *prometheus.GaugeVec
+	ready         *atomic.Bool
+	telegramReady prometheus.Gauge
+	reads         *prometheus.CounterVec
+	registry      *prometheus.Registry
+	operation     *prometheus.CounterVec
+	admissions    *prometheus.CounterVec
+	replies       *prometheus.CounterVec
+	context       *prometheus.CounterVec
+	model         *prometheus.CounterVec
+	tokens        *prometheus.CounterVec
+	active        *prometheus.GaugeVec
 }
 
 func newMetrics() *metrics {
 	m := &metrics{
 		registry: prometheus.NewRegistry(),
+		telegramReady: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "tessa_telegram_worker_ready",
+			Help: "Whether the Telegram worker has successfully polled and is not in an outage.",
+		}),
+		reads: counter("tessa_telegram_read_requests_total", "Telegram read attempts by method and bounded outcome.", "method", "result"),
 		operation: counter(
 			"tessa_telegram_poll_requests_total",
 			"Telegram polling requests.",
@@ -61,7 +70,7 @@ func newMetrics() *metrics {
 			nil,
 		),
 	}
-	m.registry.MustRegister(m.operation, m.admissions, m.replies, m.context, m.model, m.tokens, m.active)
+	m.registry.MustRegister(m.telegramReady, m.reads, m.operation, m.admissions, m.replies, m.context, m.model, m.tokens, m.active)
 	return m
 }
 
@@ -102,4 +111,19 @@ func (m *metrics) ObserveModelCompletion(p, model string, _ time.Duration, c dee
 		m.tokens.WithLabelValues(p, model, "input_cache_miss").Add(float64(c.Usage.PromptCacheMissTokens))
 		m.tokens.WithLabelValues(p, model, "output").Add(float64(c.Usage.CompletionTokens))
 	}
+}
+
+func (m *metrics) ObserveTelegramRead(method, result string) {
+	m.reads.WithLabelValues(method, result).Inc()
+}
+
+func (m *metrics) SetTelegramReady(ready bool) {
+	if m.ready != nil {
+		m.ready.Store(ready)
+	}
+	value := 0.0
+	if ready {
+		value = 1
+	}
+	m.telegramReady.Set(value)
 }

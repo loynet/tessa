@@ -23,8 +23,11 @@ import (
 )
 
 func Run(ctx context.Context, cfg Config, db *storage.DB, telegramClient *telegram.Client, logger *slog.Logger) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	metrics := newMetrics()
 	var ready atomic.Bool
+	metrics.ready = &ready
 	server, errors, err := startHTTPServer(cfg.Runtime.HTTPAddr, metrics, &ready, logger.With("worker", "http"))
 	if err != nil {
 		return err
@@ -53,13 +56,15 @@ func Run(ctx context.Context, cfg Config, db *storage.DB, telegramClient *telegr
 	if err != nil {
 		return fmt.Errorf("create chat assistant: %w", err)
 	}
-	ready.Store(true)
 	errc := make(chan error, 1)
 	go func() { errc <- a.Run(ctx) }()
 	select {
 	case <-ctx.Done():
+		<-errc
 		return nil
 	case err := <-errors:
+		cancel()
+		<-errc
 		return fmt.Errorf("http server: %w", err)
 	case err := <-errc:
 		return err

@@ -11,7 +11,7 @@ Telegram topic in memory, then replies in that topic.
 
 ## Configure and run locally
 
-Requirements: Go 1.25 or newer, a Telegram bot token, a DeepSeek API key, and
+Requirements: Go 1.26.10 or newer, a Telegram bot token, a DeepSeek API key, and
 a ptchan-gateway integration with reading enabled.
 
 Copy [config/example.toml](config/example.toml) to an untracked local file and
@@ -76,6 +76,11 @@ container, then replaces only the named container. The SQLite volume remains.
 The selected configuration is mounted read-only at `/etc/tessa/config.toml`.
 Set `DOCKER_NETWORK` when Tessa must reach ptchan-gateway by its Docker service
 name; the Makefile intentionally does not publish host ports.
+
+The builder uses Go 1.26.10 and requires Debian's `ca-certificates` package
+version `20250419+deb13u1` or newer. The scratch runtime copies that refreshed
+bundle. These updates block the compromised emSign G3 intermediate chains,
+including their AAA Certificate Services cross-signs (CVE-2026-111943).
 
 ### Health and metrics
 

@@ -1,4 +1,11 @@
-FROM golang:1.26.2-trixie AS build
+FROM golang:1.26.10-trixie AS build
+
+# The scratch runtime inherits this bundle, not the host's trust store.
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates \
+	&& dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20250419+deb13u1 \
+	&& update-ca-certificates --fresh \
+	&& rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
